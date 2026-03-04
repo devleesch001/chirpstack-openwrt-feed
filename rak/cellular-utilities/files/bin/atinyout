@@ -1,0 +1,114 @@
+#!/bin/sh
+
+# === CONFIGURATION ===
+PORT="/dev/ttyUSB2"
+BAUD="115200"
+TIMEOUT="2"
+
+# === OPTIONS HANDLING ===
+RAW_MODE=0
+CMD=""
+
+# Help function
+usage() {
+    echo "\
+AT Command Wrapper - A lightweight alternative to 'atinout'.
+Sends AT commands via 'socat' and returns clean, script-ready data.
+
+Usage: $0 [OPTIONS] <AT_Command>
+
+    Options:
+      -h, --help    Show this help message and exit
+      -r, --raw     Show the raw response from the modem
+
+    Examples:
+      $0 AT+CCID
+      $0 -r AT+CGSN
+      $0 --raw AT+CIMI
+"
+    exit 1
+}
+
+# Parse command line arguments
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -h|--help)
+            usage
+            ;;
+        -r|--raw)
+            RAW_MODE=1
+            shift
+            ;;
+        -*)
+            echo "Error: Unknown option: $1"
+            usage
+            ;;
+        *)
+            # Stop parsing options, the rest is the AT command
+            CMD="$1"
+            break
+            ;;
+    esac
+done
+
+# === ARGUMENTS CHECK ===
+if [ -z "$CMD" ]; then
+    echo "Error: No command provided."
+    usage
+fi
+
+# === FUNCTION 1 : SEND COMMAND ===
+send_at_command() {
+    cmd="$1"
+    # The crnl option handles carriage returns, using socat to query the port
+    echo "$cmd" | socat -t "$TIMEOUT" - "$PORT,b$BAUD,raw,echo=0,crnl" 2>/dev/null
+}
+
+# === FUNCTION 2 : PARSE RESPONSE (NORMAL MODE) ===
+parse_at_response() {
+    raw_data="$1"
+    original_cmd="$2"
+
+    # Check if the modem returned an error
+    if echo "$raw_data" | grep -q "ERROR"; then
+        echo "Error: The modem rejected the command."
+        return 1
+    fi
+
+    # === CLEANING HORRIBLE AT RESPONSE PIPELINE ===
+    # This pipeline acts as a series of filters to extract just the raw value:
+    # 1. tr   : Removes hidden carriage returns (\r) sent by the modem.
+    # 2. grep : Discards the line containing the echoed AT command.
+    # 3. grep : Discards the final "OK" success message.
+    # 4. grep : Discards any completely empty lines.
+    # 5. tr   : Removes any stray spaces left inside or around the number.
+    clean_data=$(echo "$raw_data" | \
+        tr -d '\r' | \
+        grep -v -F "$original_cmd" | \
+        grep -v -E "^(OK)$" | \
+        grep -v "^$" | \
+        tr -d ' ')
+
+    if [ -z "$clean_data" ]; then
+        echo "No data returned (OK)."
+    else
+        echo "$clean_data"
+    fi
+}
+
+# === MAIN EXECUTION ===
+
+# 1. Query the modem (store the raw result)
+RAW_RESPONSE=$(send_at_command "$CMD")
+
+# 2. Display based on the selected mode
+if [ "$RAW_MODE" -eq 1 ]; then
+    # RAW MODE (-r or --raw) : Display the response as is
+    # Keeping a 'tr -d \r' just to keep the terminal output clean
+    echo "$RAW_RESPONSE" | tr -d '\r'
+else
+    # NORMAL MODE : Clean and display
+    parse_at_response "$RAW_RESPONSE" "$CMD"
+fi
+
+exit 0
