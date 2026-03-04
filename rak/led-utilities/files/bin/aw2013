@@ -1,0 +1,261 @@
+#!/bin/sh
+
+# AW2013 LED controller script
+# === CONFIGURATION ===
+I2C_PORT=0
+I2C_DEVICE="/dev/i2c-$I2C_PORT"
+
+# Usage function
+usage() {
+    echo "\
+AW2013 Command Controller
+Control the RGB LED via I2C for the AW2013 chip.
+
+Usage: $0 [OPTIONS] <Command> <Params>
+    Options:
+      -h, --help      Show this help message and exit
+
+    Commands:
+      reset           Reset AW2013 registers to default
+      init            Initialize the controller (Fade in/out, PWM mode)
+      color <color>   Set a predefined color (red, green, blue, white, off...)
+      rgb <R> <G> <B> Set a custom RGB color using hex values (e.g., 0xFF 0x00 0x88)
+
+    Examples:
+      $0 reset
+      $0 color purple
+      $0 rgb 0x00 0x33 0x99
+"
+    exit 1
+}
+
+check_device() {
+    # Checking i2c port available
+    if [ ! -c "$I2C_DEVICE" ]; then
+        echo "Error: $I2C_DEVICE port not found."
+        exit 1
+    fi
+
+    # Read the IADR register (0x77) which defaults to 0x45
+    REG_VALUE=$(i2cget -y 0 0x45 0x77 2>/dev/null)
+
+    # Check if the returned value matches the expected default I2C address
+    if [ "$REG_VALUE" != "0x45" ]; then
+        echo "Error: The device does not seem to return its address (Read value: $REG_VALUE)."
+        echo "It might not be the correct controller (AW2013 expected)."
+        exit 1
+    fi
+}
+
+reset() {
+    check_device || return
+    i2cset -y 0 0x45 0x00 0x55
+}
+
+# Setup LED
+init_device() {
+    check_device || return
+
+    # Enable LED GCR
+    i2cset -y 0 0x45 0x01 0x01
+
+    # Reset RGB channels to prevent old conf
+    i2cset -y 0 0x45 0x30 0x00
+
+    # PWM Control Mode LCFG
+    # Fade Out, Fade In, PWM, 15mA
+    # Bit 7   | Bit 6 (FO) | Bit 5 (FI) | Bit 4 (MD) | Bit 3    | Bit 2    | Bits 1 et 0 (IMAX)
+    # 0 (Fixe)| Fade Out   | Fade In    | Mode       | 0 (Fixe) | 0 (Fixe) | Power
+    i2cset -y 0 0x45 0x31 0x63
+    i2cset -y 0 0x45 0x32 0x63
+    i2cset -y 0 0x45 0x33 0x63
+
+    # Setting PWM value to max power (for each RGB channels)
+    i2cset -y 0 0x45 0x34 0xff
+    i2cset -y 0 0x45 0x35 0xff
+    i2cset -y 0 0x45 0x36 0xff
+
+    # LED Timing Control Register0 (T1, T2 for each RGB channels)
+    i2cset -y 0 0x45 0x37 0x34
+    i2cset -y 0 0x45 0x3a 0x34
+    i2cset -y 0 0x45 0x3d 0x34
+
+    # LED Timing Control Register1 (T3, T4 for each RGB channels)
+    i2cset -y 0 0x45 0x38 0x30
+    i2cset -y 0 0x45 0x3b 0x30
+    i2cset -y 0 0x45 0x3e 0x30
+
+    # LED Timing Control Register2 (TO, Repeat for each RGB channels)
+    i2cset -y 0 0x45 0x39 0x50
+    i2cset -y 0 0x45 0x3c 0x50
+    i2cset -y 0 0x45 0x3f 0x50
+}
+
+set_color() {
+    COLOR="$1"
+
+    # Default value for all RGB channels
+    VAL_R="0x00"
+    VAL_G="0x00"
+    VAL_B="0x00"
+
+    # Map colors directly to PWM values instead of LCTR
+    case "$COLOR" in
+    r | red) VAL_R="0xFF" ;;
+    g | green) VAL_G="0xFF" ;;
+    b | blue) VAL_B="0xFF" ;;
+    y | yellow)
+        VAL_R="0xFF"
+        VAL_G="0xFF"
+        ;;
+    p | purple)
+        VAL_R="0xFF"
+        VAL_B="0xFF"
+        ;;
+    c | cyan)
+        VAL_G="0xFF"
+        VAL_B="0xFF"
+        ;;
+    w | white)
+        VAL_R="0xFF"
+        VAL_G="0xFF"
+        VAL_B="0xFF"
+        ;;
+    o | off | false) ;; # All stay at 0x00
+    *)
+        echo "Error: Unknown color '$COLOR'"
+        echo "Available: red, green, blue, yellow, purple, cyan, white, off"
+        exit 1
+        ;;
+    esac
+
+    echo "Setting preset color: $COLOR"
+
+    # Ensure all channels are open
+    i2cset -y 0 0x45 0x30 0x07
+
+    # Apply the PWM values to set the color
+    i2cset -y 0 0x45 0x34 "$VAL_R"
+    i2cset -y 0 0x45 0x35 "$VAL_G"
+    i2cset -y 0 0x45 0x36 "$VAL_B"
+}
+
+set_rgb() {
+    # Check if exactly 3 arguments are passed
+    if [ "$#" -ne 3 ]; then
+        echo "Error: rgb requires exactly 3 parameters (Red, Green, Blue)."
+        echo "Usage: rgb <R> <G> <B>"
+        echo "Example: rgb 0x00 0x33 0x99"
+        exit 1
+    fi
+
+    VAL_R="$1"
+    VAL_G="$2"
+    VAL_B="$3"
+
+    echo "Applying RGB color: R=$VAL_R, G=$VAL_G, B=$VAL_B"
+
+    # 1. Enable all 3 LED channels in the LCTR register (0x30)
+    # 0x07 (binary 00000111) turns on LE0, LE1, and LE2
+    i2cset -y 0 0x45 0x30 0x07
+
+    # 2. Set the intensity for each channel using the PWM registers
+    i2cset -y 0 0x45 0x34 "$VAL_R" # PWM0 (Red)
+    i2cset -y 0 0x45 0x35 "$VAL_G" # PWM1 (Green)
+    i2cset -y 0 0x45 0x36 "$VAL_B" # PWM2 (Blue)
+}
+
+set_breathing() {
+    echo "Enabling Breathing Mode (Synchronized One-Shot)..."
+
+    # Step a: Set LCTR to 00h (Disable LEDs to sync them)
+    i2cset -y 0 0x45 0x30 0x00
+
+    # Step b: Set LCFGx MD to "0" (Temporary PWM mode for config)
+    i2cset -y 0 0x45 0x31 0x03
+    i2cset -y 0 0x45 0x32 0x03
+    i2cset -y 0 0x45 0x33 0x03
+
+    # Step c: Configure timing T0-T4
+    # LEDxT0 (T1, T2): T1=1.04s, T2=0.52s -> Value: 0x32
+    i2cset -y 0 0x45 0x37 0x32
+    i2cset -y 0 0x45 0x3A 0x32
+    i2cset -y 0 0x45 0x3D 0x32
+
+    # LEDxT1 (T3, T4): T3=1.04s, T4=1.04s -> Value: 0x33
+    i2cset -y 0 0x45 0x38 0x33
+    i2cset -y 0 0x45 0x3B 0x33
+    i2cset -y 0 0x45 0x3E 0x33
+
+    # LEDxT2 (T0, Repeat): T0=0s, Repeat=Continuous -> Value: 0x00
+    i2cset -y 0 0x45 0x39 0x00
+    i2cset -y 0 0x45 0x3C 0x00
+    i2cset -y 0 0x45 0x3F 0x00
+
+    # NOTE: We purposely DO NOT set PWM (0x34, 0x35, 0x36) here
+    # so it keeps the previous color set by the 'rgb' or 'color' command!
+
+    # Step d: Set LCFGx MD to "1" (Enable One-Shot breathing mode)
+    # Bit 4 (MD)=1, Bits 1-0 (IMAX)=11 -> 0001 0011 binary = 0x13 hex
+    i2cset -y 0 0x45 0x31 0x13
+    i2cset -y 0 0x45 0x32 0x13
+    i2cset -y 0 0x45 0x33 0x13
+
+    # Step e: Set LCTR to 07h (Enable all 3 LEDs at the exact same time)
+    i2cset -y 0 0x45 0x30 0x07
+}
+
+# If no arguments provided, show help
+if [ "$#" -eq 0 ]; then
+    usage
+fi
+
+# Parse command line arguments
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+    -h | --help | help)
+        usage
+        ;;
+    reset)
+        reset
+        shift
+        ;;
+    init)
+        init_device
+        shift
+        ;;
+    colour | color)
+        if [ "$#" -lt 2 ]; then
+            echo "Error: You must provide a color (e.g., red, blue, off)."
+            exit 1
+        fi
+        init_device
+        set_color "$2"
+        shift 2 # Move past both the 'color' command AND the color argument
+        ;;
+    rgb)
+        if [ "$#" -lt 4 ]; then
+            echo "Error: 'rgb' command requires 3 hexadecimal values."
+            echo "Example: $0 rgb 0x00 0x33 0x99"
+            exit 1
+        fi
+        init_device
+        set_rgb "$2" "$3" "$4"
+        shift 4 # Move past the 'rgb' command AND its 3 arguments
+        ;;
+    breathe)
+        check_device || exit 1
+        i2cset -y 0 0x45 0x01 0x01 # Ensure GCR is on
+        set_breathing
+        shift # Move past the 'breathe' argument
+        ;;
+    -*)
+        echo "Error: Unknown option: $1"
+        usage
+        ;;
+    *)
+        echo "Error: Unknown command: $1"
+        usage
+        ;;
+    esac
+done
