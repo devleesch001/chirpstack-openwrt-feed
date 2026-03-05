@@ -29,7 +29,7 @@ define Package/rak-cellular-utilities/install
 	$(INSTALL_BIN) ./files/bin/atinyout $(1)/usr/bin
 
 	$(INSTALL_DIR) $(1)/usr/libexec/rpcd
-	$(INSTALL_BIN) ./files/rcpd/modem.qmi $(1)/usr/libexec/rpcd
+	$(INSTALL_BIN) ./files/rcpd/modem.at $(1)/usr/libexec/rpcd
 
 	$(INSTALL_DIR) $(1)/etc/uci-defaults
 	$(INSTALL_BIN) ./files/uci-defaults/99-rak-cellular-rpcd $(1)/etc/uci-defaults/

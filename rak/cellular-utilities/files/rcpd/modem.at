@@ -22,7 +22,7 @@ case "$1" in
                 model=$($AT_TOOL "AT+CGMM" | grep -v "AT+")
 
                 # IMEI (AT+CGSN) -> Extract exactly 15 digits
-                imei=$($AT_TOOL "AT+CGMM" | grep -oE "[0-9]{15}")
+                imei=$($AT_TOOL "AT+CGSN" | grep -oE "[0-9]{15}")
 
                 # SIM PIN Status (READY or SIM PIN)
                 sim_status=$($AT_TOOL "AT+CPIN?" | grep -oE "(READY|SIM PIN|ERROR)")

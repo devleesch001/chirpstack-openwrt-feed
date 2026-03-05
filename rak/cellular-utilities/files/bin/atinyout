@@ -25,35 +25,35 @@ Usage: $0 [OPTIONS] <AT_Command>
       $0 AT+CCID
       $0 -r AT+CGSN
       $0 --raw AT+CIMI
-"
+" >&2
     exit 1
 }
 
 # Parse command line arguments
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        -h|--help)
-            usage
-            ;;
-        -r|--raw)
-            RAW_MODE=1
-            shift
-            ;;
-        -*)
-            echo "Error: Unknown option: $1"
-            usage
-            ;;
-        *)
-            # Stop parsing options, the rest is the AT command
-            CMD="$1"
-            break
-            ;;
+    -h | --help)
+        usage
+        ;;
+    -r | --raw)
+        RAW_MODE=1
+        shift
+        ;;
+    -*)
+        echo "Error: Unknown option: $1" >&2
+        usage
+        ;;
+    *)
+        # Stop parsing options, the rest is the AT command
+        CMD="$1"
+        break
+        ;;
     esac
 done
 
 # === ARGUMENTS CHECK ===
 if [ -z "$CMD" ]; then
-    echo "Error: No command provided."
+    echo "Error: No command provided." >&2
     usage
 fi
 
@@ -61,7 +61,7 @@ fi
 send_at_command() {
     cmd="$1"
     # The crnl option handles carriage returns, using socat to query the port
-    echo "$cmd" | socat -t "$TIMEOUT" - "$PORT,b$BAUD,raw,echo=0,crnl" 2>/dev/null
+    echo "$cmd" | socat -t "$TIMEOUT" - "$PORT,b$BAUD,raw,echo=0,crnl"
 }
 
 # === FUNCTION 2 : PARSE RESPONSE (NORMAL MODE) ===
@@ -69,29 +69,42 @@ parse_at_response() {
     raw_data="$1"
     original_cmd="$2"
 
-    # Optional: Global error check (warning: if another command failed, this blocks everything)
-    if echo "$raw_data" | grep -q "ERROR"; then
-        echo "Error: The modem rejected a command in the buffer."
-        return 1
-    fi
-
     # === CLEANING HORRIBLE AT RESPONSE PIPELINE ===
     # 1. tr  : Removes hidden carriage returns (\r) to ensure clean UNIX line endings.
     # 2. awk : Isolates only the lines between the requested command and the next OK/ERROR.
-    # 3. tr  : Removes any residual spaces (as per your original script).
+    # 3. tr  : Removes any residual spaces.
     clean_data=$(echo "$raw_data" | tr -d '\r' | awk -v cmd="$original_cmd" '
         # If the line exactly matches the AT command, start capturing and skip to the next line
         $0 == cmd { capture=1; next }
 
-        # If we are capturing and encounter OK or ERROR, stop reading the output
-        capture && /^(OK|ERROR)$/ { exit }
+        # If we are capturing and encounter ERROR, output a special flag and stop
+        capture && /^ERROR$/ { print "_CMD_ERROR_"; exit }
+
+        # If we are capturing and encounter OK, stop reading the output successfully
+        capture && /^OK$/ { exit }
 
         # If we are capturing and the line is not empty (NF > 0), print it
         capture && NF { print }
     ' | tr -d ' ')
 
+    # Check if _CMD_ERROR_ is present anywhere in the captured data
+    if echo "$clean_data" | grep -q "_CMD_ERROR_"; then
+        echo "Error: The modem returned an ERROR for '$original_cmd'." >&2
+
+        # Remove the _CMD_ERROR_ line so clean_data only contains the actual returned data
+        clean_data=$(echo "$clean_data" | grep -v "_CMD_ERROR_")
+
+        # If there is partial data available, print it to stdout
+        if [ -n "$clean_data" ]; then
+            echo "$clean_data"
+        fi
+
+        return 1 # Ensure the script exits with an error status
+    fi
+
+    # Normal success case (OK)
     if [ -z "$clean_data" ]; then
-        echo "No data returned (OK)."
+        echo "No data returned (OK)." >&2
     else
         echo "$clean_data"
     fi
