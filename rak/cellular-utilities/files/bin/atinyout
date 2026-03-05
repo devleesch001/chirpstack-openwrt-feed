@@ -69,25 +69,26 @@ parse_at_response() {
     raw_data="$1"
     original_cmd="$2"
 
-    # Check if the modem returned an error
+    # Optional: Global error check (warning: if another command failed, this blocks everything)
     if echo "$raw_data" | grep -q "ERROR"; then
-        echo "Error: The modem rejected the command."
+        echo "Error: The modem rejected a command in the buffer."
         return 1
     fi
 
     # === CLEANING HORRIBLE AT RESPONSE PIPELINE ===
-    # This pipeline acts as a series of filters to extract just the raw value:
-    # 1. tr   : Removes hidden carriage returns (\r) sent by the modem.
-    # 2. grep : Discards the line containing the echoed AT command.
-    # 3. grep : Discards the final "OK" success message.
-    # 4. grep : Discards any completely empty lines.
-    # 5. tr   : Removes any stray spaces left inside or around the number.
-    clean_data=$(echo "$raw_data" | \
-        tr -d '\r' | \
-        grep -v -F "$original_cmd" | \
-        grep -v -E "^(OK)$" | \
-        grep -v "^$" | \
-        tr -d ' ')
+    # 1. tr  : Removes hidden carriage returns (\r) to ensure clean UNIX line endings.
+    # 2. awk : Isolates only the lines between the requested command and the next OK/ERROR.
+    # 3. tr  : Removes any residual spaces (as per your original script).
+    clean_data=$(echo "$raw_data" | tr -d '\r' | awk -v cmd="$original_cmd" '
+        # If the line exactly matches the AT command, start capturing and skip to the next line
+        $0 == cmd { capture=1; next }
+
+        # If we are capturing and encounter OK or ERROR, stop reading the output
+        capture && /^(OK|ERROR)$/ { exit }
+
+        # If we are capturing and the line is not empty (NF > 0), print it
+        capture && NF { print }
+    ' | tr -d ' ')
 
     if [ -z "$clean_data" ]; then
         echo "No data returned (OK)."
@@ -95,7 +96,6 @@ parse_at_response() {
         echo "$clean_data"
     fi
 }
-
 # === MAIN EXECUTION ===
 
 # 1. Query the modem (store the raw result)
