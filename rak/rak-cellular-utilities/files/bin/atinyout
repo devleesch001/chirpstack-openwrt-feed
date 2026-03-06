@@ -1,9 +1,9 @@
 #!/bin/sh
 
 # === CONFIGURATION ===
-PORT="/dev/ttyUSB2"
-BAUD="115200"
-TIMEOUT="2"
+PORT="${PORT:-/dev/ttyUSB2}"
+BAUD="${BAUD:-115200}"
+TIMEOUT="${TIMEOUT:-2}"
 
 # === OPTIONS HANDLING ===
 RAW_MODE=0
@@ -69,21 +69,22 @@ parse_at_response() {
     raw_data="$1"
     original_cmd="$2"
 
-    # === CLEANING HORRIBLE AT RESPONSE PIPELINE ===
-    # 1. tr  : Removes hidden carriage returns (\r) to ensure clean UNIX line endings.
-    # 2. awk : Isolates only the lines between the requested command and the next OK/ERROR.
-    # 3. tr  : Removes any residual spaces.
+    # === AT RESPONSE PIPELINE CLEANUP ===
+    # This pipeline extracts the core payload from a standard AT command response.
+    # Expected structure: [COMMAND]\r\n [RESPONSE_DATA] \r\nOK
+    #
+    # 1. tr -d '\r'  : Strips Windows-style carriage returns for clean UNIX processing.
+    # 2. awk         : Implements a state machine to isolate data:
+    #    - Starts capturing only AFTER the original command ($original_cmd) is echoed.
+    #    - Aborts and prints a specific flag if "ERROR" is detected.
+    #    - Gracefully exits once the "OK" terminator is reached.
+    #    - Only prints lines that contain data (NF > 0) during the capture phase.
+    # 3. tr -d ' '   : Removes any residual whitespace/spaces from the final output.
+
     clean_data=$(echo "$raw_data" | tr -d '\r' | awk -v cmd="$original_cmd" '
-        # If the line exactly matches the AT command, start capturing and skip to the next line
         $0 == cmd { capture=1; next }
-
-        # If we are capturing and encounter ERROR, output a special flag and stop
         capture && /^ERROR$/ { print "_CMD_ERROR_"; exit }
-
-        # If we are capturing and encounter OK, stop reading the output successfully
         capture && /^OK$/ { exit }
-
-        # If we are capturing and the line is not empty (NF > 0), print it
         capture && NF { print }
     ' | tr -d ' ')
 
