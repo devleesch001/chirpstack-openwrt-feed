@@ -133,7 +133,7 @@ conf_rule_sx1302() {
 		[concentratord]
 			log_level="INFO"
 			log_to_syslog=true
-            stats_interval="$stats_interval"
+			stats_interval="$stats_interval"
 			disable_crc_filter=false
 
 		[concentratord.api]
@@ -226,7 +226,7 @@ conf_rule_2g4() {
 		[concentratord]
 			log_level="INFO"
 			log_to_syslog=true
-            stats_interval="$stats_interval"
+			stats_interval="$stats_interval"
 			disable_crc_filter=false
 
 		[concentratord.api]
