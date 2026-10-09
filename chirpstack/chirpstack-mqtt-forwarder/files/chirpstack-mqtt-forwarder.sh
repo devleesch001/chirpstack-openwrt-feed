@@ -258,7 +258,7 @@ conf_command_arg() {
 }
 
 conf_rule_callbacks() {
-  local config_name="$2"
+  local config_name="$1"
 
   cat >>/var/etc/$config_name/chirpstack-mqtt-forwarder.toml <<-EOF
 		[callbacks]
