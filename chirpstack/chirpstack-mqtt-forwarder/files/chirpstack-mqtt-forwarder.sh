@@ -80,6 +80,10 @@ conf_rule_mqtt() {
     keep_alive_interval="30s"
   fi
 
+  if [ "$reconnect_interval" = "" ]; then
+    keep_alive_interval="30s"
+  fi
+
   if [ "$ca_cert" != "" ]; then
     echo "$ca_cert" >/var/etc/$config_name/ca.pem
     ca_cert="/var/etc/$config_name/ca.pem"
@@ -106,15 +110,11 @@ conf_rule_mqtt() {
 			clean_session=$clean_session
 			client_id="$client_id"
 			keep_alive_interval="$keep_alive_interval"
+			reconnect_interval="$reconnect_interval"
 			ca_cert="$ca_cert"
 			tls_cert="$tls_cert"
 			tls_key="$tls_key"
 	EOF
-
-  if [ "$reconnect_interval" != "" ]; then
-    echo "reconnect_interval=\"$reconnect_interval\"" >>/var/etc/$config_name/chirpstack-mqtt-forwarder.toml
-  fi
-
 }
 
 conf_rule_filters() {
@@ -125,7 +125,7 @@ conf_rule_filters() {
   config_get_bool forward_crc_ok $cfg forward_crc_ok true
   config_get_bool forward_crc_invalid $cfg forward_crc_invalid false
   config_get_bool forward_crc_missing $cfg forward_crc_missing false
-  config_get_bool lorawan_only $cfg lorawan_only
+  config_get_bool lorawan_only $cfg lorawan_only false
 
   # convert uci bool (1 or 0) to toml bool (true or false)
   [ "$forward_crc_invalid" = "1" ] && forward_crc_invalid="true" || forward_crc_invalid="false"
