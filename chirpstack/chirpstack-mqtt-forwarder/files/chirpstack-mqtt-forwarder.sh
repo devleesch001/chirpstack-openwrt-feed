@@ -81,7 +81,7 @@ conf_rule_mqtt() {
   fi
 
   if [ "$reconnect_interval" = "" ]; then
-    keep_alive_interval="30s"
+    reconnect_interval="30s"
   fi
 
   if [ "$ca_cert" != "" ]; then
