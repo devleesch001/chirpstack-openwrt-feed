@@ -340,10 +340,6 @@ return baseclass.extend({
       ),
     );
 
-    // force create section callbacks if it's missing
-    if (!uci.get(mqttForwarderConfig, "callbacks"))
-      uci.add(mqttForwarderConfig, "callbacks", "callbacks");
-
     s = m.section(form.NamedSection, "callbacks", "callbacks", _("Callbacks"));
 
     s.option(
